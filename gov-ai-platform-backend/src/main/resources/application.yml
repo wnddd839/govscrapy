@@ -1,0 +1,52 @@
+spring:
+  # 数据库连接配置
+  datasource:
+    url: jdbc:mysql://${DB_HOST:8.138.24.168}:${DB_PORT:3306}/${DB_NAME:gov_open}?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf-8
+    username: ${DB_USER:gov_user}
+    password: ${DB_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+        show_sql: true
+    open-in-view: false
+
+  # Redis 连接配置
+  data:
+    redis:
+      host: ${REDIS_HOST:8.138.24.168}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:123456}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /api
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://8.138.24.168:19002}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket-name: ${MINIO_BUCKET:gov-attachments}
+
+app:
+  sync:
+    # 数据同步间隔 (毫秒)，默认 60000 (1分钟)
+    interval-ms: ${SYNC_INTERVAL:60000}
+security:
+  allowed-origins: ["http://localhost:5173"]
+  rate-limit-per-minute: 120
