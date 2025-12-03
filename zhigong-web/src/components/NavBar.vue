@@ -1,13 +1,22 @@
 <template>
   <el-menu mode="horizontal" router :default-active="$route.path" :ellipsis="false" class="navbar-menu">
-    <el-menu-item index="/" class="logo-item">
-      <span class="logo-text">知公</span>
+    <el-menu-item index="/" class="logo-item" @click="scrollToTop">
+      <span class="logo-text">st333sf.top</span>
     </el-menu-item>
     <div class="flex-grow" />
-    <el-menu-item index="/" class="nav-item">首页</el-menu-item>
+    <el-menu-item index="/" class="nav-item" @click="scrollToTop">首页</el-menu-item>
     <el-menu-item index="/list" class="nav-item">发现</el-menu-item>
   </el-menu>
 </template>
+
+<script setup>
+const scrollToTop = () => {
+  window.scrollTo({
+    top: 0,
+    behavior: 'smooth'
+  })
+}
+</script>
 
 <style scoped>
 .navbar-menu {
@@ -29,7 +38,7 @@
 }
 
 .logo-text {
-  font-size: 1.8rem;
+  font-size: 1.2rem;
   font-weight: 800; /* 加粗 */
   color: #0066ff; /* 保持品牌蓝，但更深沉一点 */
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif;

@@ -44,20 +44,64 @@ const loadCategoryData = async () => {
   list.value = []
   
   try {
-    // 直接使用后端支持的 category 参数进行筛选
-    const params = {
-      page: 0,
-      size: 20,
-      category: categoryName.value // 传递分类名称给后端
-    }
+    // 由于后端更新分类字段失败（权限受限），回退到前端关键词搜索合并逻辑
+    let keywords = []
     
-    const res = await getInfoList(params)
-    
-    if (res && res.data) {
-      list.value = res.data
-    } else if (Array.isArray(res)) {
-      list.value = res
+    // 根据新的分类名称映射关键词，并尝试通过更精准的关键词组合来减少误判
+    if (categoryName.value === '政策法规') {
+      // 政策法规排除“公示”、“名单”、“中标”等明显属于其他类别的词
+      keywords = ['办法', '规定', '条例', '法律', '法规', '决定', '意见', '措施', '细则']
+    } else if (categoryName.value === '人事信息') {
+      // 增加“拟聘用”、“资格审查”等更具体的词
+      keywords = ['录用', '撤职', '任免', '名单', '公示', '招聘', '考试', '岗位', '公考', '面试', '成绩', '人员', '拟聘用', '资格审查']
+    } else if (categoryName.value === '规划计划') {
+      keywords = ['规划', '计划', '纲要', '方案', '年度计划', '发展规划', '专项规划']
+    } else if (categoryName.value === '财政预决算') {
+      keywords = ['预算', '决算', '财政', '资金', '经费', '三公']
+    } else if (categoryName.value === '招标采购') {
+      keywords = ['招标', '采购', '中标', '成交', '单一来源', '竞争性磋商', '询价']
+    } else {
+      // 默认获取全部
+      const res = await getInfoList({ page: 0, size: 20 })
+      if (res && res.data) list.value = res.data
+      else if (Array.isArray(res)) list.value = res
+      return
     }
+
+    // 并行请求每个关键词的数据并合并
+    const promises = keywords.map(kw => getInfoList({ 
+      page: 0, 
+      size: 10, // 每个关键词取前10条
+      q: kw 
+    }))
+
+    const results = await Promise.all(promises)
+    
+    let allItems = []
+    results.forEach(res => {
+      const items = (res && res.data) ? res.data : (Array.isArray(res) ? res : [])
+      allItems = allItems.concat(items)
+    })
+
+    // 去重 (根据ID)
+    const uniqueItems = []
+    const seenIds = new Set()
+    
+    allItems.forEach(item => {
+      if (!seenIds.has(item.id)) {
+        seenIds.add(item.id)
+        uniqueItems.push(item)
+      }
+    })
+
+    // 按发布时间倒序排序
+    uniqueItems.sort((a, b) => {
+      const dateA = new Date(a.publishDate || a.publish_date || 0)
+      const dateB = new Date(b.publishDate || b.publish_date || 0)
+      return dateB - dateA
+    })
+
+    list.value = uniqueItems
 
   } catch (error) {
     console.error('Failed to load category data', error)

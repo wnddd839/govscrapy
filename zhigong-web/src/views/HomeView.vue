@@ -1,7 +1,7 @@
 <template>
   <div class="home-container">
     <div class="main-search-wrapper">
-      <h1 class="brand-title">知公</h1>
+      <h1 class="brand-title">st333sf.top</h1>
       <p class="brand-subtitle">一站式政务信息聚合平台</p>
       
       <div class="search-container">
