@@ -72,7 +72,7 @@ const searchParams = reactive({
   q: '',
   region: '',
   page: 1, // Element Plus pagination starts at 1, backend at 0 usually? Doc says "page (from 0)"
-  size: 10
+  size: 20
 })
 const dateRange = ref([])
 const list = ref([])
@@ -88,7 +88,8 @@ const fetchData = async () => {
       page: searchParams.page - 1, // Convert to 0-based for backend
       size: searchParams.size,
       startDate: dateRange.value ? dateRange.value[0] : undefined,
-      endDate: dateRange.value ? dateRange.value[1] : undefined
+      endDate: dateRange.value ? dateRange.value[1] : undefined,
+      source: 'mysql' // 指定走MySQL数据源
     }
     
     const res = await getInfoList(params)
@@ -182,6 +183,24 @@ watch(() => route.query, (newQuery) => {
   margin-bottom: 20px;
   border-bottom: 1px solid #eee;
   padding-bottom: 10px;
+}
+/* 修复输入框交互导致按钮抖动问题 */
+.search-form :deep(.el-form-item) {
+  margin-right: 12px;
+}
+.search-form :deep(.el-input) {
+  width: 320px;
+}
+.search-form :deep(.el-input__wrapper) {
+  transition: none !important;
+  box-shadow: none !important;
+  padding: 0 11px !important; /* 保持交互前后一致，避免宽度变化 */
+}
+.search-form :deep(.el-input__wrapper:hover),
+.search-form :deep(.el-input__wrapper.is-focus) {
+  transition: none !important;
+  box-shadow: none !important;
+  padding: 0 11px !important;
 }
 .list-item {
   padding: 15px 0;
