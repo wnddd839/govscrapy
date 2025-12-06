@@ -22,5 +22,9 @@ public final class CacheKeyConstant {
     public static String crawlDataKey(String date, String id) {
         return CRAWL_DATA_PREFIX + ":" + date + ":" + id;
     }
+
+    public static String crawlHotKey(String category) {
+        return "crawl:hot:" + (category == null ? "all" : category);
+    }
 }
 

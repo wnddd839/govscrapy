@@ -32,6 +32,9 @@ public class PublicInfo {
 
     @Column(name = "category")
     private String category;
+
+    @Column(name = "column_flag")
+    private String columnFlag;
     
     @Convert(converter = JsonListConverter.class)
     @Column(name = "attachments", columnDefinition = "JSON")
