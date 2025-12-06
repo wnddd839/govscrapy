@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+logs/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual environments
+venv/
+env/
+*.venv/
+
+# Test files
+*.pyc
+.pytest_cache/
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Scrapy
+.scrapy/
+
+# MySQL
+*.sql
+
+# Other
+*.pyo
+*.pyd
+
+# Custom logs
+crawl_*.log
