@@ -5,6 +5,8 @@ import requests
 import io
 import os
 import re
+import yaml
+import uuid
 from datetime import datetime
 from itemadapter import ItemAdapter
 from minio import Minio
@@ -21,8 +23,14 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
 
 class RedisPipeline:
+    """
+    Redis数据处理管道
+    实现与后端Redis的标准化对接
+    使用Hash+Sorted Set结构
+    """
     def __init__(self, redis_host, redis_port, redis_password, redis_db, 
-                 minio_endpoint, minio_access_key, minio_secret_key, minio_bucket, minio_secure):
+                 minio_endpoint, minio_access_key, minio_secret_key, minio_bucket, minio_secure,
+                 category_config_path):
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis_password = redis_password
@@ -35,6 +43,17 @@ class RedisPipeline:
         self.minio_bucket = minio_bucket
         self.minio_secure = minio_secure
         self.minio_client = None
+        
+        # Load category config
+        self.category_config_path = category_config_path
+        self.categories = self._load_category_config()
+        
+        # Redis key constants (与后端CacheKeyConstant一致)
+        self.HASH_KEY_PREFIX = "gov:data:"  # Hash存储前缀
+        self.NEW_DATA_SET = "gov:data:new"  # 待同步集合
+        self.HOT_DATA_SET = "gov:data:hot"  # 热门数据集合
+        self.HOT_DATA_LIMIT = 100  # 热门数据保留数量
+        self.DATA_TTL = 60 * 60 * 24  # 24小时TTL
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -47,8 +66,19 @@ class RedisPipeline:
             minio_access_key=crawler.settings.get('MINIO_ACCESS_KEY'),
             minio_secret_key=crawler.settings.get('MINIO_SECRET_KEY'),
             minio_bucket=crawler.settings.get('MINIO_BUCKET'),
-            minio_secure=crawler.settings.get('MINIO_SECURE', False)
+            minio_secure=crawler.settings.get('MINIO_SECURE', False),
+            category_config_path=crawler.settings.get('CATEGORY_CONFIG_PATH')
         )
+
+    def _load_category_config(self):
+        """加载分类配置"""
+        try:
+            with open(self.category_config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            return config.get('categories', [])
+        except Exception as e:
+            print(f"Failed to load category config: {e}")
+            return []
 
     def open_spider(self, spider):
         # Redis Connection
@@ -59,12 +89,13 @@ class RedisPipeline:
                 password=self.redis_password,
                 db=self.redis_db,
                 decode_responses=True,
-                socket_timeout=5
+                socket_timeout=10,
+                retry_on_timeout=True
             )
             self.redis_client.ping()
-            spider.logger.info("Redis connection established.")
+            spider.logger.info("✅ Redis connection established.")
         except Exception as e:
-             spider.logger.error(f"Redis Connection Failed: {e}")
+             spider.logger.error(f"❌ Redis Connection Failed: {e}")
 
         
         # MinIO Connection
@@ -84,20 +115,7 @@ class RedisPipeline:
                 spider.logger.error(f"MinIO Connection Failed: {e}")
 
     def close_spider(self, spider):
-        # Trigger Backend Sync
-        # POST /api/admin/sync/db
-        # Using server IP since backend is likely on the server
-        backend_url = "http://8.138.24.168:8080/api/admin/sync/db"
-        try:
-            spider.logger.info(f"Triggering backend sync at {backend_url}...")
-            resp = requests.post(backend_url, json={"trigger": "crawler", "spider": spider.name}, timeout=10)
-            if resp.status_code == 200:
-                spider.logger.info("✅ Backend sync triggered successfully.")
-            else:
-                spider.logger.warning(f"⚠️ Backend sync returned status {resp.status_code}: {resp.text}")
-        except Exception as e:
-            spider.logger.error(f"❌ Failed to trigger backend sync: {e}")
-
+        # Trigger Backend Sync removed as requested
         if self.redis_client:
             self.redis_client.close()
 
@@ -184,56 +202,136 @@ class RedisPipeline:
         return None
 
     def _classify_category(self, title, content, source_url):
+        """
+        自动分类标记
+        URL规则优先，关键词兜底
+        与后端gov_category_config表一致
+        """
         t = title or ""
         c = content or ""
-        s = (t + c)
-        if any(k in s for k in ["任免","任命","人事","干部","录用","聘任","撤职"]):
-            return "人事信息"
-        if any(k in s for k in ["招标","采购","中标","投标","公开招标","竞争性谈判","询价"]):
-            return "招标采购"
-        if any(k in s for k in ["规划","计划","实施方案","行动计划","年度计划"]):
-            return "规划计划"
-        if any(k in s for k in ["财政","预算","决算","预决算","税","收费"]):
-            return "财政预决算"
-        if any(k in s for k in ["规定","办法","意见","决定","条例","指导意见","实施细则","政策"]):
-            return "政策法规"
+        s = (t + c).lower()
         u = (source_url or "").lower()
-        if "zfwj" in u or "szfwj" in u:
-            return "政策法规"
+        
+        # 1. URL规则匹配（优先）
+        for category in self.categories:
+            if not category.get('is_active', True):
+                continue
+            
+            url_patterns = category.get('url_patterns', [])
+            for pattern in url_patterns:
+                if pattern in u:
+                    return category['category_tag']
+        
+        # 2. 关键词匹配
+        for category in self.categories:
+            if not category.get('is_active', True):
+                continue
+            
+            keywords = category.get('keywords', [])
+            for keyword in keywords:
+                if keyword.lower() in s:
+                    return category['category_tag']
+        
+        # 3. 默认分类
         return "其他"
 
+    def _generate_data_id(self):
+        """生成UUID，32位无横线"""
+        return uuid.uuid4().hex
+
+    def _generate_fingerprint(self, title, publish_time):
+        """生成数据指纹，用于去重"""
+        return hashlib.md5(f"{title}_{publish_time}".encode('utf-8')).hexdigest()
+
+    def _is_duplicate(self, fingerprint):
+        """检查数据是否重复"""
+        # 使用Redis集合存储指纹
+        fingerprint_key = "gov:data:fingerprints"
+        # 检查指纹是否存在
+        if self.redis_client.sismember(fingerprint_key, fingerprint):
+            return True
+        # 添加指纹，设置TTL为30天
+        self.redis_client.sadd(fingerprint_key, fingerprint)
+        self.redis_client.expire(fingerprint_key, 60 * 60 * 24 * 30)
+        return False
+
+    def _format_publish_time(self, publish_date_str):
+        """格式化发布时间为YYYY-MM-DD HH:mm:ss"""
+        if not publish_date_str:
+            return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        publish_time = publish_date_str
+        try:
+            # Try to parse various date formats
+            if len(publish_date_str) == 10:  # YYYY-MM-DD
+                dt = datetime.strptime(publish_date_str, '%Y-%m-%d')
+                publish_time = dt.strftime('%Y-%m-%d %H:%M:%S')
+            elif len(publish_date_str) > 10:  # YYYY-MM-DD HH:MM:SS or similar
+                # Try multiple formats
+                formats = [
+                    '%Y-%m-%d %H:%M:%S', 
+                    '%Y-%m-%d %H:%M', 
+                    '%Y/%m/%d %H:%M:%S', 
+                    '%Y.%m.%d %H:%M:%S',
+                    '%Y年%m月%d日 %H:%M:%S',
+                    '%Y年%m月%d日'
+                ]
+                for fmt in formats:
+                    try:
+                        dt = datetime.strptime(publish_date_str[:19], fmt)
+                        publish_time = dt.strftime('%Y-%m-%d %H:%M:%S')
+                        break
+                    except:
+                        continue
+        except Exception as e:
+            print(f"Failed to parse publish_date: {publish_date_str}, using current time")
+            publish_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        return publish_time
+
     def process_item(self, item, spider):
+        """处理爬虫数据，写入Redis"""
         adapter = ItemAdapter(item)
         
-        # 1. Prepare Data
+        # 1. 准备数据
         title = adapter.get('title')
-        source_url = adapter.get('sourceUrl')
-        publish_date_str = adapter.get('publishDate')
-        
-        if not publish_date_str:
-             publish_date_str = datetime.now().strftime('%Y-%m-%d')
-
-        # Format date for key: yyyyMMdd
-        date_key = None
-        if publish_date_str:
-            m = re.search(r'\d{4}[-/.]\d{2}[-/.]\d{2}', str(publish_date_str))
-            if m:
-                cleaned = m.group(0).replace('/', '-').replace('.', '-')
-                try:
-                    dt = datetime.strptime(cleaned, '%Y-%m-%d')
-                    date_key = dt.strftime('%Y%m%d')
-                except Exception:
-                    pass
-        if not date_key:
-            date_key = datetime.now().strftime('%Y%m%d')
-
-        # Generate ID
-        if not source_url:
-            return item 
+        if title and len(title) > 255:
+            spider.logger.warning(f"⚠️ Title too long ({len(title)}). Truncating to 255 chars.")
+            title = title[:252] + "..."
             
-        data_id = hashlib.md5(source_url.encode('utf-8')).hexdigest()
+        source_url = adapter.get('sourceUrl') or adapter.get('source_url')
+        if source_url and len(source_url) > 512:
+            spider.logger.warning(f"⚠️ SourceUrl too long ({len(source_url)}). Truncating to 512 chars.")
+            source_url = source_url[:512]
 
-        # 2. Process Attachments (Upload to MinIO)
+        publish_date_str = adapter.get('publishDate') or adapter.get('publish_time')
+        
+        source_org = adapter.get('sourceOrg') or adapter.get('publish_dept')
+        if source_org and len(source_org) > 100:
+            spider.logger.warning(f"⚠️ SourceOrg too long ({len(source_org)}). Truncating to 100 chars.")
+            source_org = source_org[:97] + "..."
+            
+        raw_content = adapter.get('contentText') or adapter.get('content')
+        
+        if not source_url:
+            spider.logger.warning(f"⚠️ Skipped item without source_url: {title}")
+            return item
+            
+        # 2. 生成数据ID和时间
+        data_id = self._generate_data_id()
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        current_timestamp = int(datetime.now().timestamp())
+        
+        # 3. 格式化发布时间
+        publish_time = self._format_publish_time(publish_date_str)
+        
+        # 4. 数据去重
+        fingerprint = self._generate_fingerprint(title, publish_time)
+        if self._is_duplicate(fingerprint):
+            spider.logger.info(f"🔄 Duplicate item skipped: {title[:50]}...")
+            return item
+        
+        # 5. 处理附件
         attachments = adapter.get('attachments') or []
         processed_attachments = []
         
@@ -250,25 +348,21 @@ class RedisPipeline:
                         original_data = io.BytesIO(resp.content)
                         original_size = len(resp.content)
                         
-                        # 2.1 Upload Original File
+                        # Upload Original File
                         safe_name = os.path.basename(att_name) if att_name else f"file_{hashlib.md5(att_url.encode()).hexdigest()}"
-                        object_name_original = f"{date_key}/{data_id}/{safe_name}"
+                        object_name_original = f"{datetime.now().strftime('%Y%m%d')}/{data_id}/{safe_name}"
                         
                         self._upload_to_minio(original_data, original_size, content_type, object_name_original, spider)
                         
-                        # standardized fields for front-end/backend
+                        # Standardized fields
                         minio_url = self._minio_object_url(object_name_original)
                         att['original_url'] = att_url
                         att['url'] = minio_url
                         att['size'] = original_size
-                        # ensure type present
                         att['type'] = att.get('type') or os.path.splitext(safe_name)[1].replace('.', '').lower()
 
-                        # 2.2 Handle PDF Logic
-                        # If the file IS a PDF, we store it in the PDF folder as well for consistency? 
-                        # User request: "pdf文件夹就以日期加pdf后缀标注即可" -> {date}_pdf/{id}/{filename}
-                        
-                        pdf_folder_key = f"{date_key}_pdf"
+                        # Handle PDF Logic
+                        pdf_folder_key = f"{datetime.now().strftime('%Y%m%d')}_pdf"
                         
                         if safe_name.lower().endswith('.pdf'):
                             att['pdf_url'] = att['url']
@@ -288,51 +382,100 @@ class RedisPipeline:
                                 att['pdf_path'] = None
                         
                     else:
-                        spider.logger.warning(f"Failed to download attachment: {att_url} Status: {resp.status_code}")
+                        spider.logger.warning(f"⚠️ Failed to download attachment: {att_url} Status: {resp.status_code}")
                 except Exception as e:
-                    spider.logger.error(f"Error uploading attachment {att_url}: {e}")
+                    spider.logger.error(f"❌ Error uploading attachment {att_url}: {e}")
             
             processed_attachments.append(att)
 
-        # 3. Construct Payload
-        # Clean content text (remove HTML tags)
-        raw_content = adapter.get('contentText')
+        # 6. 清理正文
         cleaned_content = self._clean_html(raw_content)
         
-        payload = {
-            "title": title,
-            "sourceOrg": adapter.get('sourceOrg'),
-            "sourceUrl": source_url,
-            "publishDate": publish_date_str,
-            "region": adapter.get('region'),
-            "contentText": cleaned_content,
-            "attachments": processed_attachments,
-            "category": self._classify_category(title, cleaned_content, source_url)
-        }
+        # 7. 自动分类
+        # Prioritize category from item if available (from spider config)
+        category_tag = adapter.get('category')
+        if not category_tag:
+            category_tag = self._classify_category(title, cleaned_content, source_url)
         
-        json_value = json.dumps(payload, ensure_ascii=False)
+        # 安全检查：防止分类字段过长导致后端报错
+        if category_tag and len(category_tag) > 50:
+            spider.logger.warning(f"⚠️ Detected abnormal category length ({len(category_tag)}). Value: {category_tag[:50]}... Resetting to '其他'.")
+            category_tag = "其他"
+        
+        # 8. 提取来源网站
+        source_website = spider.name.replace('_', ' ').title() if spider.name else "未知来源"
+        if "gd_gov" in spider.name:
+            source_website = "广东省人民政府"
+        elif "hn_gov" in spider.name:
+            source_website = "海南省人民政府"
+        elif "hainanlist" in spider.name:
+            source_website = "海南省人民政府列表"
+        
+        # 9. 构建符合后端要求的数据结构
+        gov_data = {
+            "dataId": data_id,
+            "title": title,
+            "content": cleaned_content,
+            "publishTime": publish_time,
+            "sourceUrl": source_url,
+            "sourceWebsite": source_website,
+            "publishDept": source_org or "未知单位",
+            "category": category_tag,
+            "crawlTime": current_time,
+            "isNew": "1",  # 固定为1，标记未同步
+            "attachments": json.dumps(processed_attachments, ensure_ascii=False)
+        }
 
-        # 4. Redis Operations (Priority 2 - Cache/Notification)
-        # FILTER: Only write to Redis if the item is from 2025
+        # 10. Redis写入（严格遵循后端规范）
         try:
-            # Extract year from date_key (format YYYYMMDD) or publish_date_str
-            item_year = int(date_key[:4])
+            # Step 1: 写入Hash结构
+            hash_key = f"{self.HASH_KEY_PREFIX}{data_id}"
+            self.redis_client.hset(hash_key, mapping=gov_data)
+            self.redis_client.expire(hash_key, self.DATA_TTL)  # 24小时TTL
             
-            if item_year == 2025:
-                redis_key = f"crawl:data:{date_key}:{data_id}"
-                
-                # Step 1: Write data details with TTL 3 days
-                self.redis_client.setex(redis_key, 60 * 60 * 24 * 3, json_value)
-                
-                # Step 2: Add to pending set
-                member = f"{date_key}:{data_id}"
-                self.redis_client.sadd("crawl:pending:ids", member)
-                
-                spider.logger.info(f"Pushed to Redis: {redis_key} (Year: {item_year})")
-            else:
-                spider.logger.info(f"Skipped Redis write for old item: {title} (Year: {item_year})")
-                
+            # Step 2: 添加到待同步集合
+            self.redis_client.zadd(self.NEW_DATA_SET, {data_id: current_timestamp})
+            
+            # Step 3: 添加到热门数据集合
+            self.redis_client.zadd(self.HOT_DATA_SET, {data_id: current_timestamp})
+            
+            # Step 4: 保留最新100条热门数据
+            self.redis_client.zremrangebyrank(self.HOT_DATA_SET, 0, -self.HOT_DATA_LIMIT - 1)
+            
+            spider.logger.info(f"✅ Pushed to Redis: {hash_key} | Category: {category_tag} | Source: {source_website}")
+            
         except Exception as e:
-            spider.logger.error(f"Redis Write Failed: {e}")
+            # 重试机制
+            for retry in range(3):
+                try:
+                    spider.logger.warning(f"🔄 Retrying Redis write ({retry+1}/3)...")
+                    # 重试写入
+                    hash_key = f"{self.HASH_KEY_PREFIX}{data_id}"
+                    self.redis_client.hset(hash_key, mapping=gov_data)
+                    self.redis_client.expire(hash_key, self.DATA_TTL)
+                    self.redis_client.zadd(self.NEW_DATA_SET, {data_id: current_timestamp})
+                    self.redis_client.zadd(self.HOT_DATA_SET, {data_id: current_timestamp})
+                    self.redis_client.zremrangebyrank(self.HOT_DATA_SET, 0, -self.HOT_DATA_LIMIT - 1)
+                    spider.logger.info(f"✅ Redis write succeeded after retry.")
+                    break
+                except Exception as retry_e:
+                    if retry == 2:  # 最后一次重试
+                        spider.logger.error(f"❌ Redis write failed after 3 retries: {retry_e}")
+                    else:
+                        import time
+                        time.sleep(1)  # 重试间隔1秒
 
+        # 11. 更新Item，返回给后续管道
+        adapter['dataId'] = data_id
+        adapter['title'] = title
+        adapter['content'] = cleaned_content
+        adapter['publishTime'] = publish_time
+        adapter['sourceUrl'] = source_url
+        adapter['sourceWebsite'] = source_website
+        adapter['publishDept'] = source_org or "未知单位"
+        adapter['category'] = category_tag
+        adapter['crawlTime'] = current_time
+        adapter['isNew'] = "1"
+        adapter['attachments'] = processed_attachments
+        
         return item

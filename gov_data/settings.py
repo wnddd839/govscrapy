@@ -46,9 +46,13 @@ DOWNLOAD_DELAY = 1
 
 # Enable or disable downloader middlewares
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-#DOWNLOADER_MIDDLEWARES = {
-#    "gov_data.middlewares.GovDataDownloaderMiddleware": 543,
-#}
+DOWNLOADER_MIDDLEWARES = {
+    "gov_data.middlewares.GovDataDownloaderMiddleware": 543,
+    "gov_data.middlewares.RandomUserAgentMiddleware": 500,  # 随机User-Agent
+    "gov_data.middlewares.ProxyMiddleware": 600,  # IP代理池
+    "gov_data.middlewares.RetryMiddleware": 700,  # 请求重试
+    "scrapy.downloadermiddlewares.retry.RetryMiddleware": None,  # 禁用默认重试中间件
+}
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
@@ -63,10 +67,28 @@ ITEM_PIPELINES = {
 }
 
 # Redis Configuration
-REDIS_HOST = '8.138.24.168'
-REDIS_PORT = 6379
-REDIS_PASSWORD = '123456'
-REDIS_DB = 0
+# Load from config/redis_config.yml
+import os
+import yaml
+
+# Load Redis config
+REDIS_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'redis_config.yml')
+with open(REDIS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+    redis_config = yaml.safe_load(f)['redis']
+
+REDIS_HOST = redis_config['host']
+REDIS_PORT = redis_config['port']
+REDIS_PASSWORD = redis_config['password']
+REDIS_DB = redis_config['db']  # Set to 1 as required
+REDIS_SOCKET_TIMEOUT = redis_config['socket_timeout']
+REDIS_RETRY_TIMES = redis_config['retry_times']
+REDIS_RETRY_INTERVAL = redis_config['retry_interval']
+
+# Crawl Rules Config Path
+CRAWL_RULES_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'crawl_rules.yml')
+
+# Category Config Path
+CATEGORY_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'category_config.yml')
 
 # MinIO Configuration
 MINIO_ENDPOINT = '8.138.24.168:19002'

@@ -3,7 +3,9 @@
 # See documentation in:
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+import random
 from scrapy import signals
+from fake_useragent import UserAgent
 
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
@@ -98,3 +100,66 @@ class GovDataDownloaderMiddleware:
 
     def spider_opened(self, spider):
         spider.logger.info("Spider opened: %s" % spider.name)
+
+
+class RandomUserAgentMiddleware:
+    """
+    随机User-Agent中间件
+    使用fake-useragent生成随机User-Agent
+    """
+    def __init__(self):
+        self.ua = UserAgent()
+    
+    def process_request(self, request, spider):
+        # 设置随机User-Agent
+        request.headers['User-Agent'] = self.ua.random
+        spider.logger.debug(f"🔀 Set User-Agent: {request.headers['User-Agent']}")
+        return None
+
+
+class ProxyMiddleware:
+    """
+    IP代理池中间件
+    可配置代理列表，随机选择使用
+    """
+    def __init__(self):
+        # 代理列表（可从外部配置加载）
+        self.proxies = [
+            # "http://proxy1:port",
+            # "http://proxy2:port",
+            # "http://proxy3:port",
+        ]
+    
+    def process_request(self, request, spider):
+        if self.proxies:
+            proxy = random.choice(self.proxies)
+            request.meta['proxy'] = proxy
+            spider.logger.debug(f"🔀 Set Proxy: {proxy}")
+        return None
+
+
+class RetryMiddleware:
+    """
+    请求重试中间件
+    对失败请求进行重试
+    """
+    def __init__(self):
+        self.retry_times = 3  # 重试次数
+        self.retry_http_codes = [408, 429, 500, 502, 503, 504]  # 需要重试的HTTP状态码
+    
+    def process_response(self, request, response, spider):
+        if response.status in self.retry_http_codes:
+            spider.logger.warning(f"⚠️ Response status {response.status} for {request.url}, retrying...")
+            return request.copy()
+        return response
+    
+    def process_exception(self, request, exception, spider):
+        # 对请求异常进行重试
+        retry_count = request.meta.get('retry_count', 0)
+        if retry_count < self.retry_times:
+            retry_count += 1
+            request.meta['retry_count'] = retry_count
+            spider.logger.warning(f"⚠️ Exception for {request.url}, retrying {retry_count}/{self.retry_times}...")
+            return request.copy()
+        spider.logger.error(f"❌ Failed after {self.retry_times} retries for {request.url}")
+        return None

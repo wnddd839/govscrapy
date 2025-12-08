@@ -1,0 +1,124 @@
+# 分类规则配置
+# 与后端gov_category_config表完全一致
+# URL规则优先，关键词兜底
+# Modified based on CATEGORY_STANDARDS.md
+
+categories:
+  # 1. 招考招聘 (Recruitment) - Code 1003
+  # Must come before "人事任免" to ensure priority matching for shared keywords
+  - category_tag: "招考招聘"
+    category_name: "招考招聘"
+    url_patterns: 
+      - "/zkzp/"
+      - "/zhaopin/"
+      - "/gwy/"
+      - "/exam/"
+    keywords: 
+      - "招聘"
+      - "招考"
+      - "录用"
+      - "遴选"
+      - "公选"
+      - "面试"
+      - "笔试"
+      - "成绩"
+      - "公务员考试"
+      - "事业单位招聘"
+    is_active: true
+
+  # 2. 人事任免 (Appointments) - Code 1002
+  - category_tag: "人事任免"
+    category_name: "人事任免"
+    url_patterns: 
+      - "/rsxx/"
+      - "/renshi/"
+      - "/rs/"
+      - "/gbrm/"
+      - "/rqgs/"
+    keywords: 
+      - "任免"
+      - "任命"
+      - "任职"
+      - "撤职"
+      - "干部"
+      - "免去"
+      - "拟任"
+      - "公示" # Note: "公示" often appears in both, but usually "干部...公示" -> 人事. "成绩公示" -> 招考 (caught above).
+    is_active: true
+
+  # 3. 政策法规 (Policies & Laws) - Code 1001
+  # Merged "政策文件" and "政策法规"
+  - category_tag: "政策法规"
+    category_name: "政策法规"
+    url_patterns: 
+      - "/zfwj/"
+      - "/szfwj/"
+      - "/wenjian/"
+      - "/zcfg/"
+      - "/fagui/"
+      - "/wj/"
+    keywords: 
+      - "政策"
+      - "文件"
+      - "法规"
+      - "法律"
+      - "条例"
+      - "办法"
+      - "规定"
+      - "细则"
+      - "决定"
+      - "指导意见"
+      - "实施办法"
+      - "实施细则"
+      - "司法解释"
+      - "地方性法规"
+    is_active: true
+
+  # 4. 规划计划 (Plans) - Code 1004
+  - category_tag: "规划计划"
+    category_name: "规划计划"
+    url_patterns: 
+      - "/ghjh/"
+      - "/plan/"
+    keywords: 
+      - "规划"
+      - "计划"
+      - "纲要"
+      - "年度计划"
+      - "发展规划"
+      - "行动计划"
+    is_active: true
+
+  # 5. 统计数据 (Statistics) - Code 1005
+  # Including fiscal data here as it fits "Data/Statistics" better than Policy
+  - category_tag: "统计数据"
+    category_name: "统计数据"
+    url_patterns: 
+      - "/tjsj/"
+      - "/stats/"
+      - "/czjs/"
+      - "/juesuan/"
+      - "/czys/"
+      - "/yusuan/"
+    keywords: 
+      - "统计"
+      - "数据"
+      - "公报"
+      - "经济指标"
+      - "财政决算"
+      - "决算公开"
+      - "部门决算"
+      - "财政预算"
+      - "预算公开"
+      - "部门预算"
+    is_active: true
+
+  # Legacy/Specific categories kept just in case, but mapped to Standards if possible above.
+  # 重大项目 -> Maybe keep as is if it's a distinct requirement, or map to 规划计划?
+  # The doc says "Strictly use the following". I will comment out non-standard ones or map them.
+  # For now, I'll keep "重大项目" as a fallback if it doesn't match above, but the user might want strict adherence.
+  # "重大项目" is not in the list. I'll leave it out to force standard compliance or let it fall to "其他" or add it if the user insists on strictness.
+  # Given "按照要求修改" (Modify according to requirements), and the table lists only 5.
+  # I will remove "重大项目" to be safe, or map its keywords to "规划计划" or "政策法规" depending on content.
+  # "项目建设" -> "规划计划"?
+  # I'll stick to the 5 standard categories + "其他".

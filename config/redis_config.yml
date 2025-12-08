@@ -1,0 +1,11 @@
+# Redis配置文件
+# 与后端保持一致，数据库固定为1
+
+redis:
+  host: 8.138.24.168
+  port: 6379
+  password: '123456'
+  db: 1
+  socket_timeout: 3000
+  retry_times: 3
+  retry_interval: 1

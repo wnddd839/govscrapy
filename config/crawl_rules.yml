@@ -1,0 +1,97 @@
+# 爬取规则配置
+# 按网站维度配置，支持动态调整
+
+websites:
+  - website_name: "广东省人民政府"
+    website_domain: "gd.gov.cn"
+    allowed_domains:
+      - "gd.gov.cn"
+    list_page:
+      url_template: "https://www.gd.gov.cn/zwgk/gsgg/index{page}.html"
+      start_page: 1
+      end_page: 50
+      page_param: "page"
+      list_item_selector: "div.con li, ul.list li, div.list li"
+      title_selector: "span.til a::text, a::text"
+      url_selector: "span.til a::attr(href), a::attr(href)"
+      publish_time_selector: "span.time::text"
+    detail_page:
+      content_selectors: 
+        - "div.zw"
+        - "div.view_con"
+        - "div.content"
+        - "div.article"
+        - "div.news_cont"
+      content_text_selector: "p::text, div::text"
+      publish_dept_selector: "span.source::text, div.source::text"
+      attachment_selector: "a"
+      attachment_url_selector: "::attr(href)"
+      attachment_name_selector: "::text"
+    crawl_config:
+      crawl_interval: 1  # 秒
+      concurrent_requests: 5
+      download_delay: 2
+      random_delay_range: [0.5, 3.0]
+      enabled: true
+      mode: "incremental"  # incremental 或 full
+  
+  - website_name: "海南省人民政府"
+    website_domain: "hainan.gov.cn"
+    allowed_domains:
+      - "hainan.gov.cn"
+    list_page:
+      url_template: "https://www.hainan.gov.cn/hainan/gkml/{page}.html"
+      start_page: 1
+      end_page: 50
+      page_param: "page"
+      list_item_selector: "div.listbox ul li, div.newslist ul li, ul.news_list li"
+      title_selector: "a::text"
+      url_selector: "a::attr(href)"
+      publish_time_selector: "span.time::text, em::text"
+    detail_page:
+      content_selectors: 
+        - "div.content"
+        - "div.article"
+        - "div.view"
+      content_text_selector: "p::text, div::text"
+      publish_dept_selector: "div.info span.source::text"
+      attachment_selector: "div.attachment a, div.files a"
+      attachment_url_selector: "::attr(href)"
+      attachment_name_selector: "::text"
+    crawl_config:
+      crawl_interval: 1
+      concurrent_requests: 5
+      download_delay: 2
+      random_delay_range: [0.5, 3.0]
+      enabled: true
+      mode: "incremental"
+  
+  - website_name: "海南省人民政府列表"
+    website_domain: "hainan.gov.cn"
+    allowed_domains:
+      - "hainan.gov.cn"
+    list_page:
+      url_template: "https://www.hainan.gov.cn/hainan/szfwj/{page}.html"
+      start_page: 1
+      end_page: 50
+      page_param: "page"
+      list_item_selector: "div.zfwj_list ul li, ul.zfwj_list li"
+      title_selector: "a::text"
+      url_selector: "a::attr(href)"
+      publish_time_selector: "span.time::text"
+    detail_page:
+      content_selectors: 
+        - "div.content"
+        - "div.article_content"
+      content_text_selector: "p::text, div::text"
+      publish_dept_selector: "div.info span.dept::text"
+      attachment_selector: "a.file"
+      attachment_url_selector: "::attr(href)"
+      attachment_name_selector: "::text"
+    crawl_config:
+      crawl_interval: 1
+      concurrent_requests: 5
+      download_delay: 2
+      random_delay_range: [0.5, 3.0]
+      enabled: true
+      mode: "incremental"
