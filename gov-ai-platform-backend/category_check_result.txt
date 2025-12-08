@@ -1,0 +1,7 @@
+=== DISTINCT CATEGORIES IN DB ===
+Category: [招考招聘]
+Category: [人事任免]
+=================================
+Count '人事任免': 62
+Count '招考招聘': 33
+Count '人事专栏': 0

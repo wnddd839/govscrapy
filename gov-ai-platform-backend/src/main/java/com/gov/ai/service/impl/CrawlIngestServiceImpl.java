@@ -13,7 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
-import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
 
@@ -35,7 +35,7 @@ public class CrawlIngestServiceImpl implements CrawlIngestService {
         if (items == null || items.isEmpty()) return;
         for (CrawlItemDTO dto : items) {
             PublicInfo info = toEntity(dto);
-            String date = dto.publishDate != null ? dto.publishDate.toString() : LocalDate.now().toString();
+            String date = dto.publishDate != null ? dto.publishDate.toString() : OffsetDateTime.now().toLocalDate().toString();
             String idStr = dto.id != null ? String.valueOf(dto.id) : RedisCacheUtil.safeHash(dto.sourceUrl + ":" + dto.title);
 
             // 写入详情JSON用于后续同步到MySQL
@@ -45,8 +45,8 @@ public class CrawlIngestServiceImpl implements CrawlIngestService {
 
             // 写入热门分栏ZSet（member为dataKey，score为发布时间）
             String hotKey = CacheKeyConstant.crawlHotKey(dto.category);
-            double score = (info.getPublishDate() != null ? info.getPublishDate() : LocalDate.now())
-                    .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+            double score = (info.getPublishTime() != null ? info.getPublishTime() : OffsetDateTime.now())
+                    .toInstant().toEpochMilli();
             redisTemplate.opsForZSet().add(hotKey, dataKey, score);
             redisTemplate.expire(hotKey, java.time.Duration.ofDays(7));
         }
@@ -81,7 +81,10 @@ public class CrawlIngestServiceImpl implements CrawlIngestService {
         pi.setTitle(dto.title);
         pi.setSourceOrg(dto.sourceOrg);
         pi.setSourceUrl(dto.sourceUrl);
-        pi.setPublishDate(dto.publishDate);
+        // 将LocalDate转换为OffsetDateTime
+        if (dto.publishDate != null) {
+            pi.setPublishTime(dto.publishDate.atStartOfDay(ZoneId.systemDefault()).toOffsetDateTime());
+        }
         pi.setContentText(dto.contentText);
         pi.setRegion(dto.region);
         pi.setCategory(dto.category);

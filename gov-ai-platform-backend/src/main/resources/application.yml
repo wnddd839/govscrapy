@@ -1,7 +1,7 @@
 spring:
   # 数据库连接配置
   datasource:
-    url: jdbc:mysql://${DB_HOST:8.138.24.168}:${DB_PORT:3306}/${DB_NAME:gov_open}?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf-8
+    url: jdbc:mysql://${DB_HOST:8.138.24.168}:${DB_PORT:3306}/${DB_NAME:gov_open}?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull
     username: ${DB_USER:gov_user}
     password: ${DB_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -25,6 +25,7 @@ spring:
       host: ${REDIS_HOST:8.138.24.168}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:123456}
+      database: 1 # 单独使用1号库，避免与其他业务冲突
       timeout: 3000ms
       lettuce:
         pool:
