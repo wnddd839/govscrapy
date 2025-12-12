@@ -2,7 +2,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const service = axios.create({
-  baseURL: '/api', // Use Vite proxy
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api', // 从环境变量读取，默认使用Vite proxy
   timeout: 10000
 })
 
@@ -19,9 +19,28 @@ service.interceptors.request.use(
 // Response interceptor
 service.interceptors.response.use(
   response => {
-    // If the backend returns the structure { data: ..., page: ..., ... } directly
-    // we just return the body.
-    return response.data
+    // Adapter for new backend structure { code: 200, message: "...", data: ... }
+    const res = response.data
+    
+    // Log for debugging
+    console.log(`[API Response] ${response.config.url}`, res)
+
+    // Check if it matches the standard response structure
+    if (res && typeof res.code === 'number') {
+      if (res.code === 200 || res.code === 0) {
+        return res.data
+      } else {
+        ElMessage({
+          message: res.message || res.msg || 'Error',
+          type: 'error',
+          duration: 5 * 1000
+        })
+        return Promise.reject(new Error(res.message || res.msg || 'Error'))
+      }
+    }
+    
+    // Fallback for direct data return or other formats
+    return res
   },
   error => {
     console.error('API Error:', error)

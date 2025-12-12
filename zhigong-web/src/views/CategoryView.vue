@@ -1,28 +1,114 @@
 <template>
   <div class="category-container">
-    <div class="category-header">
+    <!-- 页面头部 -->
+    <div class="page-header">
       <el-breadcrumb separator="/">
         <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-        <el-breadcrumb-item>{{ categoryName }}</el-breadcrumb-item>
+        <el-breadcrumb-item>{{ currentCategory }}</el-breadcrumb-item>
       </el-breadcrumb>
-      <h2 class="category-title">{{ categoryName }}</h2>
+      <h1 class="page-title">{{ currentCategory }} - 政务信息列表</h1>
     </div>
 
-    <div v-loading="loading" class="feed-list">
-      <el-empty v-if="!loading && list.length === 0" description="暂无相关内容" />
-      
-      <div v-for="item in list" :key="item.id" class="feed-card" @click="goToDetail(item)">
-        <h3 class="feed-title">{{ item.title }}</h3>
-        <div class="feed-meta">
-          <span class="meta-tag source-tag">{{ item.sourceOrg || item.source_org || '政务发布' }}</span>
-          <span class="meta-dot" v-if="item.region">·</span>
-          <span class="meta-text" v-if="item.region">{{ item.region }}</span>
-          <div style="flex-grow: 1;"></div>
-          <span class="meta-text">{{ formatDate(item.publishDate || item.publish_date) }}</span>
-        </div>
+    <!-- 筛选区域 -->
+    <div class="search-filter-section">
+      <el-form :inline="true" :model="searchForm" class="search-form">
+        <el-form-item label="关键词">
+          <el-input v-model="searchForm.q" placeholder="搜索标题/内容" clearable @keyup.enter="handleSearch" />
+        </el-form-item>
+        <el-form-item label="地区">
+          <el-input v-model="searchForm.region" placeholder="请输入地区" clearable @keyup.enter="handleSearch" />
+        </el-form-item>
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="searchForm.dateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            @change="handleSearch"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch" :loading="isLoading">搜索</el-button>
+          <el-button @click="resetSearch">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </div>
+
+    <!-- 筛选与分页控制 -->
+    <div class="filter-pagination">
+      <div class="filter-group">
+        <el-select 
+          v-model="pageSize" 
+          placeholder="每页条数" 
+          size="small"
+          @change="fetchCategoryData"
+        >
+          <el-option label="10条/页" :value="10"></el-option>
+          <el-option label="20条/页" :value="20"></el-option>
+          <el-option label="50条/页" :value="50"></el-option>
+        </el-select>
       </div>
-      
-      <!-- 分页或其他加载更多逻辑可以在这里添加 -->
+      <el-pagination
+        @size-change="handleSizeChange"
+        @current-change="handleCurrentChange"
+        :current-page="currentPage"
+        :page-sizes="[10, 20, 50]"
+        :page-size="pageSize"
+        layout="total, sizes, prev, pager, next, jumper"
+        :total="total"
+        small
+      />
+    </div>
+
+    <!-- 分类数据列表 -->
+    <el-table
+      :data="categoryDataList"
+      border
+      stripe
+      :loading="isLoading"
+      class="category-table"
+      @row-click="goToDetail"
+    >
+      <el-table-column
+        label="标题"
+        prop="title"
+        min-width="400"
+        :show-overflow-tooltip="true"
+      />
+      <el-table-column
+        label="发布单位"
+        prop="publish_dept"
+        width="180"
+        :show-overflow-tooltip="true"
+      />
+      <el-table-column
+        label="发布时间"
+        prop="publish_time"
+        width="180"
+        :formatter="formatTime"
+      />
+      <el-table-column
+        label="操作"
+        width="100"
+        fixed="right"
+      >
+        <template #default="scope">
+          <el-button 
+            type="text" 
+            size="small"
+            @click.stop="goToDetail(scope.row)"
+          >
+            查看详情
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <!-- 空状态 -->
+    <div v-if="categoryDataList.length === 0 && !isLoading" class="empty-state">
+      <el-empty description="暂无该分类下的政务信息" />
     </div>
   </div>
 </template>
@@ -30,174 +116,211 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getInfoList } from '../api/publicInfo'
+import { 
+  ElTable, ElTableColumn, ElPagination, ElBreadcrumb, ElBreadcrumbItem, 
+  ElSelect, ElOption, ElButton, ElEmpty, ElForm, ElFormItem, ElInput, ElDatePicker 
+} from 'element-plus'
+import { publicInfoApi } from '../api/publicInfo'
+import { formatTime } from '../utils/date'
 
 const route = useRoute()
 const router = useRouter()
-const categoryName = ref('')
-const list = ref([])
-const loading = ref(false)
 
-const loadCategoryData = async () => {
-  categoryName.value = route.params.name
-  loading.value = true
-  list.value = []
+// 分类标签（从路由参数获取）
+const currentCategory = ref(route.params.name || '政务信息')
+// 分页参数
+const currentPage = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+// 数据状态
+const allCategoryData = ref([]) // 所有加载的数据（用于前端排序和搜索）
+const categoryDataList = ref([]) // 当前页显示的数据
+const isLoading = ref(true)
+
+// 搜索参数
+const searchForm = ref({
+  q: '',
+  region: '',
+  dateRange: []
+})
+
+// 处理本地数据：排序、搜索、分页
+const processLocalData = () => {
+  let processed = [...allCategoryData.value]
   
+  // 1. 本地搜索（关键词匹配标题）
+  if (searchForm.value.q) {
+    const keyword = searchForm.value.q.toLowerCase()
+    processed = processed.filter(item => 
+      (item.title && item.title.toLowerCase().includes(keyword)) ||
+      (item.content && item.content.toLowerCase().includes(keyword))
+    )
+  }
+  
+  // 2. 本地排序（按发布时间倒序）
+  processed.sort((a, b) => {
+    const timeA = new Date(a.publish_time || 0).getTime()
+    const timeB = new Date(b.publish_time || 0).getTime()
+    return timeB - timeA // 倒序
+  })
+  
+  // 更新总数
+  total.value = processed.length
+  
+  // 3. 本地分页
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  categoryDataList.value = processed.slice(start, end)
+}
+
+// 获取分类数据
+const fetchCategoryData = async () => {
+  isLoading.value = true
   try {
-    // 由于后端更新分类字段失败（权限受限），回退到前端关键词搜索合并逻辑
-    let keywords = []
-    
-    // 根据新的分类名称映射关键词，并尝试通过更精准的关键词组合来减少误判
-    if (categoryName.value === '政策法规') {
-      // 政策法规排除“公示”、“名单”、“中标”等明显属于其他类别的词
-      keywords = ['办法', '规定', '条例', '法律', '法规', '决定', '意见', '措施', '细则']
-    } else if (categoryName.value === '人事信息') {
-      // 增加“拟聘用”、“资格审查”等更具体的词
-      keywords = ['录用', '撤职', '任免', '名单', '公示', '招聘', '考试', '岗位', '公考', '面试', '成绩', '人员', '拟聘用', '资格审查']
-    } else if (categoryName.value === '规划计划') {
-      keywords = ['规划', '计划', '纲要', '方案', '年度计划', '发展规划', '专项规划']
-    } else if (categoryName.value === '财政预决算') {
-      keywords = ['预算', '决算', '财政', '资金', '经费', '三公']
-    } else if (categoryName.value === '招标采购') {
-      keywords = ['招标', '采购', '中标', '成交', '单一来源', '竞争性磋商', '询价']
-    } else {
-      // 默认获取全部
-      const res = await getInfoList({ page: 0, size: 20 })
-      if (res && res.data) list.value = res.data
-      else if (Array.isArray(res)) list.value = res
-      return
+    const backendCategoryTag = currentCategory.value
+    console.log(`Frontend Category: ${currentCategory.value}, Backend Tag: ${backendCategoryTag}`)
+
+    // 一次性获取大量数据用于前端处理
+    const params = {
+      categoryTag: backendCategoryTag, 
+      source: 'mysql', 
+      page: 1, 
+      size: 1000, // 获取足够多的数据
+      // 不传搜索参数给后端，改为前端过滤
+      q: '',
+      region: '' 
     }
 
-    // 并行请求每个关键词的数据并合并
-    const promises = keywords.map(kw => getInfoList({ 
-      page: 0, 
-      size: 10, // 每个关键词取前10条
-      q: kw 
-    }))
-
-    const results = await Promise.all(promises)
+    const res = await publicInfoApi.getCategoryData(params)
+    allCategoryData.value = res.list || []
     
-    let allItems = []
-    results.forEach(res => {
-      const items = (res && res.data) ? res.data : (Array.isArray(res) ? res : [])
-      allItems = allItems.concat(items)
-    })
-
-    // 去重 (根据ID)
-    const uniqueItems = []
-    const seenIds = new Set()
+    // 处理数据
+    processLocalData()
     
-    allItems.forEach(item => {
-      if (!seenIds.has(item.id)) {
-        seenIds.add(item.id)
-        uniqueItems.push(item)
-      }
-    })
-
-    // 按发布时间倒序排序
-    uniqueItems.sort((a, b) => {
-      const dateA = new Date(a.publishDate || a.publish_date || 0)
-      const dateB = new Date(b.publishDate || b.publish_date || 0)
-      return dateB - dateA
-    })
-
-    list.value = uniqueItems
-
   } catch (error) {
-    console.error('Failed to load category data', error)
+    console.error('获取分类数据失败：', error)
+    allCategoryData.value = []
+    categoryDataList.value = []
+    total.value = 0
   } finally {
-    loading.value = false
+    isLoading.value = false
   }
 }
 
-const goToDetail = (item) => {
+// 搜索处理
+const handleSearch = () => {
+  currentPage.value = 1
+  processLocalData() // 仅触发本地处理
+}
+
+// 分页处理
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1 // 重置到第一页
+  processLocalData()
+}
+
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+  processLocalData()
+}
+
+// 重置搜索
+const resetSearch = () => {
+  searchForm.value = {
+    q: '',
+    region: '',
+    dateRange: []
+  }
+  handleSearch()
+}
+
+// 监听路由参数变化（支持切换分类）
+watch(
+  () => route.params.name,
+  (newVal) => {
+    if (newVal) {
+      currentCategory.value = newVal
+      // 切换分类重置页码和搜索
+      currentPage.value = 1 
+      searchForm.value = {
+        q: '',
+        region: '',
+        dateRange: []
+      }
+      fetchCategoryData()
+    }
+  },
+  { immediate: true }
+)
+
+// 跳转到详情页
+const goToDetail = (row) => {
   router.push({
     name: 'detail',
-    params: { id: item.id },
-    state: { item: JSON.parse(JSON.stringify(item)) }
+    params: { id: row.data_id || row.dataId },
+    query: { source: 'mysql' }
   })
 }
-
-const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  const year = d.getFullYear()
-  const month = d.getMonth() + 1
-  const day = d.getDate()
-  return `${year}/${month}/${day}`
-}
-
-watch(() => route.params.name, () => {
-  loadCategoryData()
-})
-
-onMounted(() => {
-  loadCategoryData()
-})
 </script>
 
 <style scoped>
 .category-container {
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto;
+  padding: 30px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(255, 192, 203, 0.15);
+  min-height: 600px;
+}
+
+.page-header {
+  margin-bottom: 20px;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #333;
+  margin-top: 15px;
+  margin-bottom: 0;
+}
+
+.search-filter-section {
+  background: #fff0f5; /* 浅粉色背景 */
   padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 192, 203, 0.3);
 }
 
-.category-header {
-  margin-bottom: 30px;
+.filter-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 10px 0;
 }
 
-.category-title {
-  font-size: 2rem;
-  color: #303133;
-  margin-top: 20px;
+.filter-group {
+  display: flex;
+  gap: 16px;
 }
 
-.feed-list {
+.category-table {
   background: #fff;
   border-radius: 8px;
-  padding: 20px;
-  min-height: 400px;
+  overflow: hidden;
 }
 
-.feed-card {
-  padding: 20px;
-  border-bottom: 1px solid #ebeef5;
-  cursor: pointer;
-  transition: background-color 0.2s;
+.empty-state {
+  padding: 60px 0;
+  text-align: center;
 }
 
-.feed-card:hover {
-  background-color: #f9fafc;
-}
-
-.feed-title {
-  font-size: 1.2rem;
-  color: #303133;
-  margin-bottom: 10px;
-  font-weight: 500;
-}
-
-.feed-meta {
-  display: flex;
-  align-items: center;
-  font-size: 0.9rem;
-  color: #909399;
-}
-
-.meta-tag {
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin-right: 10px;
-  font-size: 0.8rem;
-}
-
-.source-tag {
-  background-color: #e6f7ff;
-  color: #1890ff;
-}
-
-.meta-dot {
-  margin: 0 5px;
+/* 表格行悬停效果 */
+:deep(.el-table__row:hover) {
+  background-color: #fff0f5 !important; /* 粉色悬停 */
 }
 </style>

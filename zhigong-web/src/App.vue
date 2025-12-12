@@ -14,7 +14,7 @@ body {
 }
 .main-content {
   min-height: calc(100vh - 60px);
-  background-color: #f5f7fa;
+  /* background-color: #f5f7fa; Removed to allow body background (pink) to show */
   padding: 20px;
 }
 </style>

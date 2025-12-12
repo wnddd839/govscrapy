@@ -9,7 +9,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
-        // rewrite: (path) => path.replace(/^\/api/, '') // 后端接口本身就带 /api 前缀，所以不需要 rewrite
+        // rewrite: (path) => path.replace(/^\/api/, '') // 后端接口需要保留 /api 前缀
       }
     }
   }

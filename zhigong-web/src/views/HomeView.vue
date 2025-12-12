@@ -1,263 +1,461 @@
 <template>
   <div class="home-container">
-    <div class="main-search-wrapper">
-      <h1 class="brand-title">st333sf.top</h1>
-      <p class="brand-subtitle">一站式政务信息聚合平台</p>
-      
-      <div class="search-container">
-        <!-- 分类导航 (替代搜索框) -->
-        <div class="category-nav">
-          <div 
-            v-for="category in categories" 
-            :key="category.name"
-            class="category-card"
-            @click="handleCategoryClick(category.name)"
-          >
-            <el-icon class="category-icon" :size="32">
-              <component :is="category.icon" />
-            </el-icon>
-            <span class="category-name">{{ category.name }}</span>
-          </div>
-        </div>
+    <!-- 顶部 Banner 区域 -->
+    <section class="hero-section">
+      <div class="hero-content">
+        <h1 class="hero-title">政务公开信息整合平台</h1>
+        <p class="hero-subtitle">汇聚最新政策、人事、项目与采购信息，为您提供一站式政务服务</p>
       </div>
-    </div>
+    </section>
 
-    <div class="content-feed">
-      <div class="feed-header">
-        <span class="feed-title">热门推荐</span>
-        <span class="feed-subtitle">今日最受关注的政务动态</span>
-      </div>
-      
-      <div v-loading="loading" class="feed-list">
-        <el-empty v-if="!loading && latestList.length === 0" description="暂无最新内容" />
+    <div class="main-content-wrapper">
+      <!-- 分类专区 -->
+      <section class="category-section">
+        <div class="section-header">
+          <h2 class="section-title">分类专区</h2>
+          <span class="section-subtitle">快速定位您关注的领域</span>
+        </div>
         
-        <div v-for="item in latestList" :key="item.id" class="feed-card" @click="goToDetail(item)">
-          <h3 class="feed-title">{{ item.title }}</h3>
-          <div class="feed-meta">
-            <span class="meta-tag source-tag">{{ item.sourceOrg || item.source_org || '政务发布' }}</span>
-            <span class="meta-dot" v-if="item.region">·</span>
-            <span class="meta-text" v-if="item.region">{{ item.region }}</span>
-            <div class="flex-grow" style="flex-grow: 1;"></div>
-            <span class="meta-text date-text">{{ formatDate(item.publishDate || item.publish_date) }}</span>
+        <div class="category-grid">
+          <div v-if="isCategoryLoading" class="loading-container">
+            <el-skeleton :rows="3" animated :count="4" />
+          </div>
+          
+          <div 
+            v-for="(category, index) in categoryList" 
+            :key="index"
+            class="category-card"
+            :class="`category-card-${index % 6}`"
+            @click="goToCategory(category)"
+          >
+            <div class="card-icon-wrapper">
+              <el-icon class="card-icon">
+                <el-icon-user v-if="category === '人事任免'" />
+                <el-icon-collection v-else-if="category === '招考招聘'" />
+                <el-icon-notification v-else-if="category === '干部公示'" />
+                <el-icon-more v-else />
+              </el-icon>
+            </div>
+            <h3 class="card-title">{{ category }}</h3>
+            <div class="card-hover-bg"></div>
           </div>
         </div>
-      </div>
+      </section>
+
+      <!-- 热门政务信息 -->
+      <section class="hot-section">
+        <div class="section-header">
+          <h2 class="section-title">热门政务信息</h2>
+          <div class="header-actions">
+            <el-button type="primary" link @click="refreshHotData" :loading="isHotLoading">
+              <el-icon><el-icon-refresh /></el-icon> 刷新
+            </el-button>
+          </div>
+        </div>
+
+        <div v-loading="isHotLoading" class="hot-grid">
+          <el-empty v-if="!isHotLoading && hotList.length === 0" description="暂无热门政务信息" />
+          
+          <div v-for="(item, index) in hotList" :key="index" class="hot-card" @click="goToDetail(item, 'redis')">
+            <div class="hot-card-body">
+              <div class="hot-tag" :class="getCategoryColorClass(item.category_tag)">
+                {{ item.category_tag || '政务' }}
+              </div>
+              <h3 class="hot-title" :title="item.title">{{ item.title }}</h3>
+              <p class="hot-summary" v-if="item.summary">{{ item.summary }}</p>
+              <div class="hot-meta">
+                <span class="meta-item"><el-icon><el-icon-office-building /></el-icon> {{ item.publish_dept || '政务发布' }}</span>
+                <span class="meta-item"><el-icon><el-icon-clock /></el-icon> {{ formatTime(item.publish_time || item.publishDate) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { User, Document, Reading, DataBoard, Bell } from '@element-plus/icons-vue'
-import { getHotInfo } from '../api/publicInfo'
+import { ref, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { ElIcon, ElButton, ElSkeleton, ElEmpty } from 'element-plus'
+import {
+  Document as ElIconDocument,
+  User as ElIconUser,
+  Collection as ElIconCollection,
+  Money as ElIconMoney,
+  Trophy as ElIconTrophy,
+  ShoppingCart as ElIconShoppingCart,
+  Notification as ElIconNotification,
+  More as ElIconMore,
+  Refresh as ElIconRefresh,
+  ArrowRight as ElIconArrowRight,
+  OfficeBuilding as ElIconOfficeBuilding,
+  Clock as ElIconClock
+} from '@element-plus/icons-vue'
+import { publicInfoApi } from '../api/publicInfo'
+import { formatTime } from '../utils/date'
 
 const router = useRouter()
-const latestList = ref([])
-const loading = ref(false)
+const route = useRoute()
+// 分类相关状态
+const categoryList = ref([])
+const isCategoryLoading = ref(true)
+// 热门数据相关状态
+const hotList = ref([])
+const isHotLoading = ref(true)
 
-// 定义分类及图标
-const categories = [
-  { name: '政策法规', icon: Document },
-  { name: '人事信息', icon: User },
-  { name: '规划计划', icon: Reading },
-  { name: '财政预决算', icon: DataBoard },
-  { name: '招标采购', icon: Bell }
-]
+// 页面挂载时加载数据
+onMounted(() => {
+  fetchCategoryList()
+  fetchHotList()
+})
 
-// 点击分类跳转到分类子页面
-const handleCategoryClick = (categoryName) => {
-  router.push(`/category/${categoryName}`)
-}
+// 监听路由 query 变化，实现刷新功能
+watch(() => route.query.t, () => {
+  fetchCategoryList()
+  fetchHotList()
+})
 
-// 加载热门信息
-const loadLatestInfo = async () => {
-  loading.value = true
+// 获取分类列表
+const fetchCategoryList = async () => {
+  isCategoryLoading.value = true
+  // 默认固定分类，防止接口异常导致菜单消失
+  const defaultCategories = ['人事任免', '招考招聘', '干部公示']
+  
   try {
-    // API might return array directly or wrapped.
-    // Doc says: Response: PublicInfo[] (default latest 10)
-    const data = await getHotInfo()
-    if (Array.isArray(data)) {
-      latestList.value = data
-    } else if (data.data) {
-        latestList.value = data.data
+    // 尝试从后端获取
+    const res = await publicInfoApi.getCategoryList()
+    // 确保返回的是数组且有内容
+    if (Array.isArray(res) && res.length > 0) {
+      categoryList.value = res
+    } else {
+      console.warn('Backend returned empty or invalid category list, using defaults')
+      categoryList.value = defaultCategories
     }
   } catch (error) {
-    console.error('Failed to load hot info', error)
+    console.error('获取分类列表失败，使用默认分类：', error)
+    categoryList.value = defaultCategories
   } finally {
-    loading.value = false
+    isCategoryLoading.value = false
   }
 }
 
-const goToDetail = (item) => {
+// 获取热门数据
+const fetchHotList = async () => {
+  isHotLoading.value = true
+  try {
+    const res = await publicInfoApi.getHotList()
+    hotList.value = res || []
+  } catch (error) {
+    console.error('获取热门数据失败：', error)
+    hotList.value = []
+  } finally {
+    isHotLoading.value = false
+  }
+}
+
+// 刷新热门数据
+const refreshHotData = () => {
+  fetchHotList()
+}
+
+// 跳转到分类页
+const goToCategory = (category) => {
   router.push({
-    name: 'detail',
-    params: { id: item.id },
-    state: { item: JSON.parse(JSON.stringify(item)) }
+    path: `/category/${category}`
   })
 }
 
-const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  const year = d.getFullYear()
-  const month = d.getMonth() + 1
-  const day = d.getDate()
-  return `${year}/${month}/${day}`
+// 跳转到详情页
+const goToDetail = (row, source) => {
+  const dataId = row.dataId || row.data_id || row.id
+  if (!dataId) {
+    console.error('Invalid dataId for detail navigation')
+    return
+  }
+  router.push({
+    name: 'detail',
+    params: { id: dataId },
+    query: source ? { source } : {}
+  })
 }
 
-onMounted(() => {
-  loadLatestInfo()
-})
+// 获取分类对应的颜色类名
+const getCategoryColorClass = (category) => {
+  const map = {
+    '人事任免': 'tag-pink',
+    '招考招聘': 'tag-pink',
+    '干部公示': 'tag-pink'
+  }
+  return map[category] || 'tag-pink'
+}
 </script>
 
 <style scoped>
 .home-container {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Hero Section */
+.hero-section {
+  background: linear-gradient(135deg, #fff0f5 0%, #ffe4e1 100%);
+  padding: 80px 20px;
+  color: #2c3e50;
+  text-align: center;
+  margin-bottom: 60px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-section::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255,255,255,0.8) 0%, transparent 60%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.hero-title {
+  font-size: 42px;
+  font-weight: 800;
+  margin: 0 0 20px;
+  letter-spacing: 2px;
+  background: linear-gradient(45deg, #2c3e50, #d63384);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0px 4px 10px rgba(255, 182, 193, 0.3);
+  position: relative;
+}
+
+.hero-subtitle {
+  font-size: 20px;
+  opacity: 0.8;
+  margin: 0;
+  font-weight: 400;
+  color: #5e6d82;
+  position: relative;
+}
+
+.main-content-wrapper {
   max-width: 1200px;
   margin: 0 auto;
+  padding: 0 20px 40px;
 }
 
-.main-search-wrapper {
-  text-align: center;
-  padding: 60px 0 40px;
-  background: linear-gradient(135deg, #f5f7fa 0%, #e4e7ed 100%);
-  border-radius: 16px;
-  margin-bottom: 40px;
+/* Section Common */
+.category-section, .hot-section {
+  margin-bottom: 60px;
 }
 
-.brand-title {
-  font-size: 3rem;
-  color: #303133;
-  margin-bottom: 10px;
-  letter-spacing: 4px;
-}
-
-.brand-subtitle {
-  font-size: 1.2rem;
-  color: #606266;
-  margin-bottom: 40px;
-}
-
-.search-container {
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.category-nav {
+.section-header {
   display: flex;
+  align-items: center;
+  margin-bottom: 30px;
+  border-bottom: 2px solid rgba(255, 192, 203, 0.3);
+  padding-bottom: 10px;
+}
+
+.section-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 16px 0 0;
+  position: relative;
+}
+
+.section-subtitle {
+  font-size: 14px;
+  color: #909399;
+}
+
+.header-actions {
+  margin-left: auto;
+}
+
+/* Category Grid - Minimalist */
+.category-grid {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 20px;
-  flex-wrap: wrap;
 }
 
 .category-card {
-  background: white;
-  padding: 20px;
-  border-radius: 12px;
-  width: 100px;
-  height: 100px;
+  flex: 0 0 auto;
+  width: 140px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   cursor: pointer;
+  padding: 20px 10px;
+  border-radius: 12px;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .category-card:hover {
+  background: rgba(255, 255, 255, 0.8);
   transform: translateY(-5px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-  color: #409EFF;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
-.category-icon {
-  margin-bottom: 10px;
-}
-
-.category-name {
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.content-feed {
-  background: white;
-  border-radius: 16px;
-  padding: 30px;
-  min-height: 400px;
-}
-
-.feed-header {
-  margin-bottom: 20px;
-  border-left: 4px solid #409EFF;
-  padding-left: 15px;
-}
-
-.feed-title {
-  font-size: 1.5rem;
-  font-weight: bold;
-  color: #303133;
-  margin-right: 15px;
-}
-
-.feed-subtitle {
-  color: #909399;
-  font-size: 0.9rem;
-}
-
-.feed-list {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-
-.feed-card {
-  padding: 20px;
-  border-bottom: 1px solid #ebeef5;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.feed-card:hover {
-  background-color: #f9fafc;
-}
-
-.feed-card:last-child {
-  border-bottom: none;
-}
-
-.feed-title {
-  font-size: 1.1rem;
-  color: #303133;
-  margin: 0 0 10px 0;
-  font-weight: 500;
-}
-
-.feed-meta {
+.card-icon-wrapper {
+  width: 64px;
+  height: 64px;
+  margin-bottom: 16px;
+  border-radius: 20px;
   display: flex;
   align-items: center;
-  font-size: 0.85rem;
+  justify-content: center;
+  transition: all 0.3s;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 15px rgba(255, 182, 193, 0.2);
+}
+
+.category-card:hover .card-icon-wrapper {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+}
+
+.card-icon {
+  font-size: 32px;
+  color: #d63384; /* Pink default color */
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0;
+}
+
+/* Colorful Icons but cleaner */
+.category-card-0 .card-icon { color: #d63384; }
+.category-card-1 .card-icon { color: #d63384; }
+.category-card-2 .card-icon { color: #d63384; }
+.category-card-3 .card-icon { color: #d63384; }
+.category-card-4 .card-icon { color: #d63384; }
+.category-card-5 .card-icon { color: #d63384; }
+
+/* Hot Grid - Grid Style */
+.hot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+}
+
+@media (max-width: 1024px) {
+  .hot-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hot-card {
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  padding: 24px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 4px 20px rgba(255, 192, 203, 0.15);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.hot-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: transparent;
+  transition: background 0.3s;
+}
+
+.hot-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
+}
+
+.hot-card:hover::before {
+  background: #ff69b4;
+}
+
+.hot-card-body {
+  position: relative;
+  z-index: 1;
+}
+
+.hot-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  letter-spacing: 0.5px;
+}
+
+/* Tag Colors - Soft Pastels */
+.tag-blue { background: #e8f3ff; color: #409eff; }
+.tag-green { background: #eaf8e3; color: #67c23a; }
+.tag-orange { background: #fff3e0; color: #e6a23c; }
+.tag-purple { background: #f4f4f5; color: #909399; }
+.tag-cyan { background: #e0f7fa; color: #40c9c6; }
+.tag-red { background: #fde2e2; color: #f56c6c; }
+.tag-pink { background: rgba(255, 192, 203, 0.2); color: #d63384; }
+.tag-default { background: rgba(255, 192, 203, 0.2); color: #d63384; }
+
+.hot-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+.hot-summary {
+  font-size: 14px;
+  color: #5e6d82;
+  margin: 0 0 20px;
+  line-height: 1.8;
+  display: -webkit-box;
+  line-clamp: 3;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hot-meta {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 13px;
   color: #909399;
+  border-top: 1px solid #f5f7fa;
+  padding-top: 16px;
 }
 
-.meta-tag {
-  background-color: #f0f2f5;
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin-right: 10px;
-  color: #606266;
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.source-tag {
-  background-color: #e6f7ff;
-  color: #1890ff;
-}
-
-.meta-dot {
-  margin: 0 5px;
-}
-
-.date-text {
-  color: #c0c4cc;
+/* Responsive */
+@media (max-width: 768px) {
+  .hero-title { font-size: 32px; }
+  .hero-subtitle { font-size: 16px; }
+  .category-grid { justify-content: center; }
+  .category-card { min-width: 100px; flex: 0 0 30%; }
 }
 </style>

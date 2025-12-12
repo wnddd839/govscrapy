@@ -5,7 +5,6 @@
     </el-menu-item>
     <div class="flex-grow" />
     <el-menu-item index="/" class="nav-item" @click="scrollToTop">首页</el-menu-item>
-    <el-menu-item index="/list" class="nav-item">发现</el-menu-item>
   </el-menu>
 </template>
 
